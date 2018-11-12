@@ -1,194 +1,199 @@
-## Using Alpine Linux
+# Using Minikube and Erlang
 
-In this example we create a docker image containing a small Erlang
-application.
+This is a quick demo of using minikube to run an Erlang node. The example we will
+use is the [Docker Watch](http://github.com/erlang/docker-erlang-example/tree/master)
+node.
 
-We use the following Dockerfile, containing two build stages:
+This is only meant to be an example of how to get started. It is not the only,
+nor neccesarily the best way to setup minikube with Erlang.
 
-```Dockerfile
-# Build stage 0
-FROM erlang:alpine
+# Other Demos
 
-# Install Rebar3
-RUN mkdir -p /buildroot/rebar3/bin
-ADD https://s3.amazonaws.com/rebar3/rebar3 /buildroot/rebar3/bin/rebar3
-RUN chmod a+x /buildroot/rebar3/bin/rebar3
+* [Using Docker](http://github.com/erlang/docker-erlang-example/)
+* [Using Minikube: Simple](http://github.com/erlang/docker-erlang-example/tree/minikube-simple)
+* [Using Minikube: Prometheus/Grafana](http://github.com/erlang/docker-erlang-example/tree/minikube-prometheus)
+* [Using Minikube: Logstash/ElasticSearch](http://github.com/erlang/docker-erlang-example/tree/minikube-logstash)
+* [Using Minikube: Distributed Erlang](http://github.com/erlang/docker-erlang-example/tree/minikube-dist)
+* [Using Minikube: Encrypted Distributed Erlang](http://github.com/erlang/docker-erlang-example/tree/minikube-tls-dist)
 
-# Setup Environment
-ENV PATH=/buildroot/rebar3/bin:$PATH
+# Prerequisites
 
-# Reset working directory
-WORKDIR /buildroot
+To start with you should familiarize yourself with minikube through this guide:
+https://kubernetes.io/docs/setup/minikube/
 
-# Copy our Erlang test application
-COPY dockerwatch dockerwatch
+In a nutshell:
 
-# And build the release
-WORKDIR dockerwatch
-RUN rebar3 as prod release
+## Install
 
+ * [VirtualBox](https://www.virtualbox.org/wiki/Downloads)
+ * [kubectl](https://kubernetes.io/docs/tasks/tools/install-kubectl/)
+ * [minikube](https://github.com/kubernetes/minikube/releases)
 
-# Build stage 1
-FROM alpine
+## Start and test
 
-# Install some libs
-RUN apk add --no-cache openssl && \
-    apk add --no-cache ncurses-libs
+    > minikube start
+    > kubectl run hello-minikube --image=k8s.gcr.io/echoserver:1.10 --port=8080
+    > kubectl expose deployment hello-minikube --type=NodePort
+    > curl $(minikube service hello-minikube --url)
+    ## Should print a lot of text
+    > kubectl delete services hello-minikube
+    > kubectl delete deployment hello-minikube
+    > minikube stop
 
-# Install the released application
-COPY --from=0 /buildroot/dockerwatch/_build/prod/rel/dockerwatch /dockerwatch
+# Deploying Dockerwatch
 
-# Expose relevant ports
-EXPOSE 8080
-EXPOSE 8443
+In this demo we will be doing three things:
 
-CMD ["/dockerwatch/bin/dockerwatch", "foreground"]
+* Create a Service that will be used to access the dockerwatch API
+* Create a Secret for our ssl keys
+* Create a Deployment of dockerwatch that implements the Service
+
+First however, make sure that the minikube cluster is started:
+
+    > minikube start
+
+## Create a Service
+
+The Service is what will be used to connect to the dockerwatch application
+from outside the kubernetes cluster. It is not stricly neccesary to create the
+Service before the deployment is done. However, it is considered good practice
+to do so, as otherwise environment variables about the Service will not be
+available in the Pods.
+
+    > kubectl create service nodeport dockerwatch --tcp=8080:8080 --tcp=8443:8443
+    service/dockerwatch created
+
+Check that it was created:
+
+    > kubectl get service
+    NAME          TYPE        CLUSTER-IP      EXTERNAL-IP   PORT(S)                         AGE
+    dockerwatch   NodePort    10.103.32.142   <none>        8080:31716/TCP,8443:30383/TCP   21m
+    kubernetes    ClusterIP   10.96.0.1       <none>        443/TCP                         1h
+
+We can see the external IP and port used through the minikube API:
+
+    > minikube service dockerwatch --url
+    http://192.168.99.101:31716
+    http://192.168.99.101:30383
+
+Take a note of the IP addresses you get as we will need them when creating the
+ssl certifcates.
+
+## Create a Secret
+
+We then need to create a new Secret that will be used to store the ssl private key
+and the certificate. The Secret will then be mounted into the running Pod just
+as was done in the original example. We start by generating the CA and the
+server certificate:
+
+    > ./create-certs $(minikube ip)
+
+Note that I put the IP address we got from `minikube service dockerwatch` above
+as an argument. This is needed in order for SNI to work properly and in extension
+to be able to connect to the service. The command will put a some files into
+the ssl folder. We then use the `kubectl` command to create a Secret with those files.
+
+    > kubectl create secret generic dockerwatch --from-file=ssl/
+    secret/dockerwatch created
+
+We can then see that the secret has been created using:
+
+    > kubectl get secrets
+    NAME          TYPE     DATA   AGE
+    dockerwatch   Opaque   6      16s
+
+## Deploy dockerwatch
+
+Now that we have our Secret and Service configured we are ready to create the
+dockerwatch Deployment. First we need to build the docker image just as in the
+docker example. However to make things simple we will build the docker image
+inside the kubernetes cluster. This is not really recommended, but it
+simplifies things for these examples. In a realworld scenario you probably want
+to setup your own docker registry.
+
+So, to start with we need to setup our shell to contect the minikube docker
+server instead of our local one. This is done through the `minikube` command:
+
+    > eval $(minikube docker-env)
+
+Then we can use `docker` as normal to build the image:
+
+    > docker build -t dockerwatch .
+
+Then the only thing that remains is to create the deployment.
+
+```
+cat <<EOF | kubectl apply -f -
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  ## Name and labels of the Deployment
+  labels:
+    app: dockerwatch
+  name: dockerwatch
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: dockerwatch
+  template:
+    metadata:
+      labels:
+        app: dockerwatch
+    spec:
+      containers:
+      ## The container to launch
+      - image: dockerwatch
+        name: dockerwatch
+        imagePullPolicy: Never ## Set to Never as we built the image in the cluster
+        ports:
+        - containerPort: 8080
+          protocol: TCP
+        - containerPort: 8443
+          protocol: TCP
+        volumeMounts:
+            - name: kube-keypair
+              readOnly: true
+              mountPath: /etc/ssl/certs
+      volumes:
+        - name: kube-keypair
+          secret:
+            secretName: dockerwatch
+EOF
 ```
 
-The image is built with the following command:
+This will create a Deployment called `dockerwatch` that run 1 replica
+of the specified dockerwatch container. The container exposes ports 8080
+and 8443 to the cluster and has the Secreat we created above mounted at
+`/etc/ssl/certs`. Most of the configuration above should be fairly self
+evident, refer to the kubernetes documentation for more details.
 
-    $ docker build -t erlang-dockerwatch .
+The Service will know that this is the Deployment to connect to by looking
+at the metadata labels on the pods for a match to `app: dockerwatch`.
 
-Notice that if you need a proxy to access the internet, you must
-forward your proxy settings to docker, for example by giving the option
-`--build-arg https_proxy=$HTTP_PROXY` to `docker build`.
+## Test the API
 
-This is what happens:
+So now we have a kubernetes cluster running with an Erlang node in it, how do we
+test that it works? `minikube` provides the answer through it's service API:
 
-#### 1. Build stage 0: build
+    > minikube service dockerwatch --url
+    http://192.168.99.101:31716
+    http://192.168.99.101:30383
 
-This step starts from the official erlang docker image based on alpine
-linux. So with the base image, a full Erlang/OTP installation already
-exists.
+The IP:Port pairs above are the external ports exposed to access our dockerwatch
+service. So to work with the content we use the same REST API as in dockerwatch:
 
-To be able to build our Erlang application, we now install rebar3.
-
-Our Erlang application is found in the `dockerwatch` directory on our
-local filesystem, and we use the `COPY` command to import this
-complete directory into the current working directory in the image.
-
-Finally, we release our erlang application using rebar3 and the
-following rebar.config.
-
-```erlang
-{deps, [{jsone,  "1.4.7"},   %% JSON Encode/Decode
-        {cowboy, "2.5.0"}]}. %% HTTP Server
-
-{relx, [{release, {"dockerwatch", "1.0.0"}, [dockerwatch]},
-        {vm_args, "config/vm.args"},
-        {sys_config, "config/sys.config"},
-        {dev_mode, true},
-        {include_erts, false},
-        {extended_start_script, true}
-    ]}.
-
-{profiles, [{prod, [{relx, [{dev_mode, false},
-                            {include_erts, true},
-                            {include_src, false}]}]}
-           ]}.
-```
-
-#### 2. Build stage 1: create a minimal docker image
-
-Now that our application is released, we can discard all extras that
-was needed for compilation. That is, we no longer need rebar3 or the
-full Erlang/OTP installation, since our release already contains the
-required parts of Erlang/OTP, including the runtime system. So, we
-start a new build stage from the apline linux docker image.
-
-Using the `COPY` command with option `--from=0`, we specify that we
-want to copy artifacts from build stage 0 into the current build
-stage. We use this to copy our released Erlang application into the
-final image.
-
-We expose the relevant ports (needed by our application), and specify
-the command to execute when running the image.
-
-
-
-## What happened?
-
-    $ docker images
-	REPOSITORY           TAG                 IMAGE ID            CREATED             SIZE
-	erlang-dockerwatch   latest              fcdd1aaa2ee7        16 seconds ago      26MB
-	<none>               <none>              c36b2d950fae        21 seconds ago      106MB
-
-
-## Generating Certificate
-
-Generate certificates in subdirectory `ssl`.
-
-    $ ./create-certs
-
-For some more details of what this command does, see [README-CERTS.md](README-CERTS.md)
-
-## Running the Erlang Application
-
-We start the image in docker container by issuing the following command.
-
-    $ docker run -d -p 8443:8443 --volume="$PWD/ssl:/etc/ssl/certs" --log-driver=syslog erlang-dockerwatch
-    870f979c5b4cdb7a1ba930b020043f50fa7457bf787237706fb27eefaf5fe61d
-
-Let's parse some of the input.
-
- * `-p 8443:8443`, exposes port `8443` from the container to our localhost
- * `--volume="$PWD/ssl:/etc/ssl/certs"`, mounts our local directory with certificates in
-   the container.
- * `--log-driver=syslog`, will log all data from stdout in the container to our local syslog.
-
-In /var/log/syslog we can see these entries:
-
-	Nov  7 14:55:42 elxa19vlx02 NetworkManager[1738]: <info>  [1541598942.5025] device (veth2644103): link connected
-	Nov  7 14:55:42 elxa19vlx02 NetworkManager[1738]: <info>  [1541598942.5026] device (docker0): link connected
-	Nov  7 14:55:43 elxa19vlx02 da217065cb2d[1334]: Exec: /dockerwatch/erts-10.1.1/bin/erlexec -noshell -noinput +Bd -boot /dockerwatch/releases/1.0.0/dockerwatch -mode embedded -boot_var ERTS_LIB_DIR /dockerwatch/lib -config /dockerwatch/releases/1.0.0/sys.config -args_file /dockerwatch/releases/1.0.0/vm.args -pa -- foreground
-	Nov  7 14:55:43 elxa19vlx02 da217065cb2d[1334]: Root: /dockerwatch
-	Nov  7 14:55:43 elxa19vlx02 da217065cb2d[1334]: /dockerwatch
-
-And here is our docker container:
-
-    $ docker ps
-	CONTAINER ID        IMAGE                COMMAND                  CREATED             STATUS              PORTS                              NAMES
-	da217065cb2d        erlang-dockerwatch   "/dockerwatch/bin/do…"   3 minutes ago       Up 2 minutes        8080/tcp, 0.0.0.0:8443->8443/tcp   nifty_heisenberg
-
-Fetch container IP Address from container id:
-
-    $ docker inspect --format='{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' 870f979c5b4c
-    172.17.0.2
-
-Create a counter called `cnt` using https with curl:
-
-    $ curl --cacert ssl/dockerwatch-ca.pem -i -H "Content-Type: application/json" -X POST -d "" https://localhost:8443/cnt
-    HTTP/1.1 204 No Content
-    server: Cowboy
-    date: Wed, 22 Feb 2017 13:12:54 GMT
-    content-length: 0
-    content-type: text/html
-    vary: accept
-
-Read all counters using https with curl as json:
-
-    curl --cacert ssl/dockerwatch-ca.pem -H "Accept: application/json" https://localhost:8443
+    > curl -H "Content-Type: application/json" -X POST -d "" http://192.168.99.101:31716/cnt
+    > curl --cacert ssl/dockerwatch-ca.pem -H "Accept: application/json" https://192.168.99.101:30383
     ["cnt"]
 
-Read the counter `cnt` using https with curl as json:
+## Further exploration
 
-    curl --cacert ssl/dockerwatch-ca.pem -H "Accept: application/json" https://localhost:8443/cnt
-    {"cnt":0}
+Minikube comes with the kubernetes dashboard, so we can easily look through a
+web interface to look and change whatever we want. You access it by running:
 
-Increment the counter `cnt` using http with curl:
+    > minikube dashboard
 
-    curl -H "Content-Type: application/json" -X POST -d '{}' http://172.17.0.2:8080/cnt
-
-Read the counter `cnt` using http with curl as text:
-
-    curl -H "Accept: text/plain" http://172.17.0.2:8080/cnt
-    1
-
-Increment the counter `cnt` by 20 using http with curl:
-
-    curl -H "Content-Type: application/json" -X POST -d '{"value":20}' http://172.17.0.2:8080/cnt
-
-Read the counter `cnt` using http with curl as text:
-
-    curl -H "Accept: text/plain" http://172.17.0.2:8080/cnt
-    21
+This should open up a tab in your default browser where you can poke about. For
+instance one thing to try is to change the number of replicas of the dockerwatch
+ReplicaSet to and see what happens.
