@@ -46,3 +46,11 @@ script:
 - "curl -v -H 'Content-Type: application/json' -X POST -d '{}' $HTTP/cnt"
 - "curl -v --cacert ssl/dockerwatch-ca.pem -H 'Accept: application/json' $HTTPS/"
 - "curl -v --cacert ssl/dockerwatch-ca.pem -H 'Accept: application/json' $HTTPS/cnt"
+- kubectl apply -f monitoring-namespace.yaml
+- kubectl apply -f prometheus-config.yaml
+- kubectl apply -f prometheus-deployment.yaml
+- kubectl apply -f prometheus-service.yaml
+- kubectl apply -f grafana-deployment.yaml
+- kubectl apply -f grafana-service.yaml
+- JSONPATH='{range .items[*]}{@.metadata.name}:{range @.status.conditions[*]}{@.type}={@.status};{end}{end}'; until kubectl -n monitoring get pods -lname=grafana -o jsonpath="$JSONPATH" 2>&1 | grep -q "Ready=True"; do sleep 5;echo "waiting for grafana to be available"; kubectl get pods --all-namespaces; done
+- JSONPATH='{range .items[*]}{@.metadata.name}:{range @.status.conditions[*]}{@.type}={@.status};{end}{end}'; until kubectl -n monitoring get pods -lname=prometheus -o jsonpath="$JSONPATH" 2>&1 | grep -q "Ready=True"; do sleep 5;echo "waiting for prometheus to be available"; kubectl get pods --all-namespaces; done

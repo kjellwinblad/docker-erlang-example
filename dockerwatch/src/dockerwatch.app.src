@@ -9,7 +9,10 @@
 		kernel,
 		stdlib,
                 jsone,
-		cowboy
+		cowboy,
+                prometheus,
+                prometheus_process_collector,
+                prometheus_cowboy
 	]},
 	{mod, {dockerwatch_app, []}},
 	{env, []}

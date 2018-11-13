@@ -1,8 +1,10 @@
-# Using Minikube and Erlang
+# Using Minikube, Erlang and Prometheus
 
-This is a quick demo of using minikube to run an Erlang node. The example we will
-use is the [Docker Watch](http://github.com/erlang/docker-erlang-example/tree/master)
-node.
+This is a quick demo of using minikube to run an Erlang node with prometheus and grafana.
+The example we will use is the
+[Docker Watch](http://github.com/erlang/docker-erlang-example/tree/master) node.
+This demo assumes that you have done the
+[Using Minikube](http://github.com/erlang/docker-erlang-example/tree/minikube-simple) demo.
 
 This is only meant to be an example of how to get started. It is not the only,
 nor neccesarily the best way to setup minikube with Erlang.
@@ -11,7 +13,7 @@ nor neccesarily the best way to setup minikube with Erlang.
 
 * [Using Docker](http://github.com/erlang/docker-erlang-example/)
 * [Using Minikube: Simple](http://github.com/erlang/docker-erlang-example/tree/minikube-simple)
-* [Using Minikube: Prometheus/Grafana](http://github.com/erlang/docker-erlang-example/tree/minikube-prometheus)
+* [Using Minikube: Prometheus/Grafana](http://github.com/erlang/docker-erlang-example/tree/minikube-prom-graf)
 * [Using Minikube: Logstash/ElasticSearch](http://github.com/erlang/docker-erlang-example/tree/minikube-logstash)
 * [Using Minikube: Distributed Erlang](http://github.com/erlang/docker-erlang-example/tree/minikube-dist)
 * [Using Minikube: Encrypted Distributed Erlang](http://github.com/erlang/docker-erlang-example/tree/minikube-tls-dist)
@@ -40,10 +42,12 @@ In a nutshell:
     > kubectl delete deployment hello-minikube
     > minikube stop
 
-# Deploying Dockerwatch
+# Deploying Dockerwatch and Prometheus
 
 In this demo we will be doing three things:
 
+* Extend dockerwatch with prometheus metrics support
+* Create Deployments for Prometheus and Grafana
 * Create a Service that will be used to access the dockerwatch API
 * Create a Secret for our ssl keys
 * Create a Deployment of dockerwatch that implements the Service
@@ -52,75 +56,85 @@ First however, make sure that the minikube cluster is started:
 
     > minikube start
 
-## Create a Service
+## Extend dockerwatch
 
-The Service is what will be used to connect to the dockerwatch application
-from outside the kubernetes cluster. It is not stricly neccesary to create the
-Service before the deployment is done. However, it is considered good practice
-to do so, as otherwise environment variables about the Service will not be
-available in the Pods.
+In this demo we will be using the [prometheus](https://hex.pm/packages/prometheus),
+[prometheus\_process\_collector](https://hex.pm/packages/prometheus_process_collector)
+and [prometheus\_cowboy](https://hex.pm/packages/prometheus_cowboy) hex packages to get
+the instrumentation we need. So we need to add those packages to the rebar.conf file.
 
-    > kubectl create service nodeport dockerwatch --tcp=8080:8080 --tcp=8443:8443
-    service/dockerwatch created
+```
+{deps, [{jsone,  "1.4.7"},   %% JSON Encode/Decode
+        {cowboy, "2.5.0"},   %% HTTP Server
+        {prometheus,"4.2.0"},
+        {prometheus_process_collector,"1.4.0"}
+        {prometheus_cowboy,"0.1.4"}]}.
+```
 
-Check that it was created:
+And also the corresponding modificaion to the app.src file:
 
-    > kubectl get service
-    NAME          TYPE        CLUSTER-IP      EXTERNAL-IP   PORT(S)                         AGE
-    dockerwatch   NodePort    10.103.32.142   <none>        8080:31716/TCP,8443:30383/TCP   21m
-    kubernetes    ClusterIP   10.96.0.1       <none>        443/TCP                         1h
+```
+{applications, [
+        kernel,
+        stdlib,
+        jsone,
+        cowboy,
+        prometheus,
+        prometheus_process_collector,
+        prometheus_cowboy
+	]},
+```
 
-We can see the external IP and port used through the minikube API:
+We then need to add a new http endpoint that takes requests from the prometheus
+server and returns the correct results. This service traditionally runs on port
+9000 so we add another child to the dockerwatch supervisor.
 
-    > minikube service dockerwatch --url
-    http://192.168.99.101:31716
-    http://192.168.99.101:30383
 
-Take a note of the IP addresses you get as we will need them when creating the
-ssl certifcates.
+```
+PromConfig =
+    #{ env => #{ dispatch =>
+                     cowboy_router:compile(
+                       [{'_', [{"/metrics/[:registry]", prometheus_cowboy2_handler, []}]}]) }
+     },
 
-## Create a Secret
+Prometheus = ranch:child_spec(
+               cowboy_prometheus, 100, ranch_tcp,
+               [{port, 9000}],
+               cowboy_clear,
+               PromConfig),
+```
 
-We then need to create a new Secret that will be used to store the ssl private key
-and the certificate. The Secret will then be mounted into the running Pod just
-as was done in the original example. We start by generating the CA and the
-server certificate:
+We also need to add the correct instrumentation to the cowboy servers so that we
+can measure things like requests per minute and the 95th percentile latency of
+requests. This is done by modifying the cowboy config to include a metric_callback
+and two stream handlers.
 
-    > ./create-certs $(minikube ip)
+```
+CowConfig = #{ env => #{ dispatch => Dispatch },
+               metrics_callback => fun prometheus_cowboy2_instrumenter:observe/1,
+               stream_handlers => [cowboy_metrics_h, cowboy_stream_h] },
+```
 
-Note that I put the IP address we got from `minikube service dockerwatch` above
-as an argument. This is needed in order for SNI to work properly and in extension
-to be able to connect to the service. The command will put a some files into
-the ssl folder. We then use the `kubectl` command to create a Secret with those files.
+You can view the entire new supervisor module [here](dockerwatch/src/dockerwatch_sup.erl).
 
-    > kubectl create secret generic dockerwatch --from-file=ssl/
-    secret/dockerwatch created
+## Deploy Dockerwatch
 
-We can then see that the secret has been created using:
+Now we should deploy the dockerwatch service almost the same way as was done in
+[Using Minikube: Simple](http://github.com/erlang/docker-erlang-example/tree/minikube-simple).
+So:
 
-    > kubectl get secrets
-    NAME          TYPE     DATA   AGE
-    dockerwatch   Opaque   6      16s
+```
+> kubectl create service nodeport dockerwatch --tcp=8080:8080 --tcp=8443:8443
+service/dockerwatch created
+> ./create-certs $(minikube ip)
+......
+> kubectl create secret generic dockerwatch --from-file=ssl/
+secret/dockerwatch created
+> eval $(minikube docker-env)
+> docker build -t dockerwatch .
+```
 
-## Deploy dockerwatch
-
-Now that we have our Secret and Service configured we are ready to create the
-dockerwatch Deployment. First we need to build the docker image just as in the
-docker example. However to make things simple we will build the docker image
-inside the kubernetes cluster. This is not really recommended, but it
-simplifies things for these examples. In a realworld scenario you probably want
-to setup your own docker registry.
-
-So, to start with we need to setup our shell to contect the minikube docker
-server instead of our local one. This is done through the `minikube` command:
-
-    > eval $(minikube docker-env)
-
-Then we can use `docker` as normal to build the image:
-
-    > docker build -t dockerwatch .
-
-Then the only thing that remains is to create the deployment.
+We will have to modify the deployment somewhat from the original example:
 
 ```
 cat <<EOF | kubectl apply -f -
@@ -140,16 +154,21 @@ spec:
     metadata:
       labels:
         app: dockerwatch
+      annotations: ## These annotations will tell prometheus to scrape us
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9000"
     spec:
       containers:
       ## The container to launch
       - image: dockerwatch
         name: dockerwatch
-        imagePullPolicy: Never ## Set to Never as we built the image in the cluster
+        imagePullPolicy: Never
         ports:
         - containerPort: 8080
           protocol: TCP
         - containerPort: 8443
+          protocol: TCP
+        - containerPort: 9000 ## Expose the prometheus port
           protocol: TCP
         volumeMounts:
             - name: kube-keypair
@@ -162,38 +181,34 @@ spec:
 EOF
 ```
 
-This will create a Deployment called `dockerwatch` that run 1 replica
-of the specified dockerwatch container. The container exposes ports 8080
-and 8443 to the cluster and has the Secreat we created above mounted at
-`/etc/ssl/certs`. Most of the configuration above should be fairly self
-evident, refer to the kubernetes documentation for more details.
+We can then setup prometheus and grafana following [the excellent example by bakins](https://github.com/bakins/minikube-prometheus-demo).
 
-The Service will know that this is the Deployment to connect to by looking
-at the metadata labels on the pods for a match to `app: dockerwatch`.
+```
+> kubectl apply -f monitoring-namespace.yaml
+> kubectl apply -f prometheus-config.yaml
+> kubectl apply -f prometheus-deployment.yaml
+> kubectl apply -f prometheus-service.yaml
+```
 
-## Test the API
+You should now be able to view the prometheus dashboard through the url given by:
 
-So now we have a kubernetes cluster running with an Erlang node in it, how do we
-test that it works? `minikube` provides the answer through it's service API:
+    minikube service --namespace=monitoring prometheus
 
-    > minikube service dockerwatch --url
-    http://192.168.99.101:31716
-    http://192.168.99.101:30383
+Then we can start Grafana:
 
-The IP:Port pairs above are the external ports exposed to access our dockerwatch
-service. So to work with the content we use the same REST API as in dockerwatch:
+```
+> kubectl apply -f grafana-deployment.yaml
+> kubectl apply -f grafana-service.yaml
+```
 
-    > curl -H "Content-Type: application/json" -X POST -d "" http://192.168.99.101:31716/cnt
-    > curl --cacert ssl/dockerwatch-ca.pem -H "Accept: application/json" https://192.168.99.101:30383
-    ["cnt"]
+Grafana can then be found under:
 
-## Further exploration
+    minikube service --namespace=monitoring grafana
 
-Minikube comes with the kubernetes dashboard, so we can easily look through a
-web interface to look and change whatever we want. You access it by running:
+The username and password is `admin`. You then need to add a new prometheus datasource to grafana.
+The url to prometheus within the cluster is http://prometheus.monitoring.svc.cluster.local:9090.
 
-    > minikube dashboard
+There are some ready made dashboards at: https://github.com/deadtrickster/beam-dashboards that
+can be imported to get something quick up and running. If done correcly it could look like this:
 
-This should open up a tab in your default browser where you can poke about. For
-instance one thing to try is to change the number of replicas of the dockerwatch
-ReplicaSet to and see what happens.
+![BEAM Dashboard](grafana-screenshot.png)
