@@ -11,7 +11,7 @@ nor neccesarily the best way to setup minikube with Erlang.
 
 * [Using Docker](http://github.com/erlang/docker-erlang-example/)
 * [Using Minikube: Simple](http://github.com/erlang/docker-erlang-example/tree/minikube-simple)
-* [Using Minikube: Prometheus/Grafana](http://github.com/erlang/docker-erlang-example/tree/minikube-prometheus)
+* [Using Minikube: Prometheus/Grafana](http://github.com/erlang/docker-erlang-example/tree/minikube-prom-graf)
 * [Using Minikube: Logstash/ElasticSearch](http://github.com/erlang/docker-erlang-example/tree/minikube-logstash)
 * [Using Minikube: Distributed Erlang](http://github.com/erlang/docker-erlang-example/tree/minikube-dist)
 * [Using Minikube: Encrypted Distributed Erlang](http://github.com/erlang/docker-erlang-example/tree/minikube-tls-dist)
