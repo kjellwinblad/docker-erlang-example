@@ -1,11 +1,12 @@
 # Using Minikube and Erlang
 
-This is a quick demo of using minikube to run an Erlang node. The example we will
-use is the [Docker Watch](http://github.com/erlang/docker-erlang-example/tree/master)
-node.
+This is a quick demo of using minikube to run a distributed Erlang application.
+The example we will use is the
+[Docker Watch](http://github.com/erlang/docker-erlang-example/tree/master)
+node as a base.
 
 This is only meant to be an example of how to get started. It is not the only,
-nor neccesarily the best way to setup minikube with Erlang.
+nor neccesarily the best way to setup minikube with distributed Erlang.
 
 # Other Demos
 
@@ -44,83 +45,158 @@ In a nutshell:
 
 In this demo we will be doing three things:
 
-* Create a Service that will be used to access the dockerwatch API
-* Create a Secret for our ssl keys
+* Create a new application called backend for mnesia
+* Modify dockerwatch to use mnesia as its storage
+* Create a Service and Deployment for the backend
 * Create a Deployment of dockerwatch that implements the Service
 
 First however, make sure that the minikube cluster is started:
 
     > minikube start
 
-## Create a Service
+## Create backend
 
-The Service is what will be used to connect to the dockerwatch application
-from outside the kubernetes cluster. It is not stricly neccesary to create the
-Service before the deployment is done. However, it is considered good practice
-to do so, as otherwise environment variables about the Service will not be
-available in the Pods.
+The purpose of the backend is to be the service responsible for writing
+keeping the data. So the only thing it needs to do is some mnesia
+initialization when [starting](backend/src/backend_app.erl).
 
-    > kubectl create service nodeport dockerwatch --tcp=8080:8080 --tcp=8443:8443
-    service/dockerwatch created
+Since we are running inside a kluster where each pod gets its own IP address
+we don't really need epmd any more. So in this example we use the `-epmd_module`
+to implement our own static epmd client that always returns port 12345 as the
+distribution port. The module looks like this:
 
-Check that it was created:
+```
+-module(epmd_static).
 
-    > kubectl get service
-    NAME          TYPE        CLUSTER-IP      EXTERNAL-IP   PORT(S)                         AGE
-    dockerwatch   NodePort    10.103.32.142   <none>        8080:31716/TCP,8443:30383/TCP   21m
-    kubernetes    ClusterIP   10.96.0.1       <none>        443/TCP                         1h
+-export([start_link/0, register_node/2, register_node/3,
+         port_please/2, address_please/3]).
+%% API.
 
-We can see the external IP and port used through the minikube API:
+start_link() ->
+    ignore.
 
-    > minikube service dockerwatch --url
-    http://192.168.99.101:31716
-    http://192.168.99.101:30383
+register_node(Name, Port) ->
+    register_node(Name, Port, inet_tcp).
+register_node(_Name, _Port, _Driver) ->
+    {ok, 0}.
 
-Take a note of the IP addresses you get as we will need them when creating the
-ssl certifcates.
+port_please(_Name, _Host) ->
+    {port, 12345, 5}.
 
-## Create a Secret
+address_please(Name, Host, AddressFamily) ->
+    erl_epmd:address_please(Name, Host, AddressFamily).
+```
 
-We then need to create a new Secret that will be used to store the ssl private key
-and the certificate. The Secret will then be mounted into the running Pod just
-as was done in the original example. We start by generating the CA and the
-server certificate:
+The module is then configured to be used in [vm.args.src](backend/config/vm.args.src):
 
-    > ./create-certs $(minikube ip)
+    -start_epmd false
+    -epmd_module epmd_static
 
-Note that I put the IP address we got from `minikube service dockerwatch` above
-as an argument. This is needed in order for SNI to work properly and in extension
-to be able to connect to the service. The command will put a some files into
-the ssl folder. We then use the `kubectl` command to create a Secret with those files.
+Lastly net_kernel has to be configured to listen to the port, this is done in the
+[sys.config.src](backend/config/sys.config.src):
 
-    > kubectl create secret generic dockerwatch --from-file=ssl/
-    secret/dockerwatch created
+```
+{kernel, [{logger,[{handler,default,logger_std_h,#{}}]},
+          %%,{logger_level,info}
+           {inet_dist_listen_min, 12345},
+           {inet_dist_listen_max, 12345}
+          ]},
+```
 
-We can then see that the secret has been created using:
+## Modify dockerwatch
 
-    > kubectl get secrets
-    NAME          TYPE     DATA   AGE
-    dockerwatch   Opaque   6      16s
+The modification of the dockerwatch module to use mnesia is pretty straight forward.
+You can see the end result [here](dockerwatch/src/dockerwatch.erl).
 
-## Deploy dockerwatch
+The same modifications with distribution port has to be done for dockerwatch as well.
+As we want to be able to scale the number of dockerwatch frontends as load increases
+we need to use a node name that is unique in the cluster. Using the IP address of
+the pod is a simple solution that works for now.
 
-Now that we have our Secret and Service configured we are ready to create the
-dockerwatch Deployment. First we need to build the docker image just as in the
-docker example. However to make things simple we will build the docker image
-inside the kubernetes cluster. This is not really recommended, but it
-simplifies things for these examples. In a realworld scenario you probably want
-to setup your own docker registry.
+In order to get the IP the following config has to be added to the dockerwatch deployment
+config:
 
-So, to start with we need to setup our shell to contect the minikube docker
-server instead of our local one. This is done through the `minikube` command:
+```
+      env:
+        - name: IP
+          valueFrom:
+            fieldRef:
+              fieldPath: status.podIP
+```
 
-    > eval $(minikube docker-env)
+and then we just use `${IP}` in [vm.args.src](dockerwatch/config/vm.args.src):
 
-Then we can use `docker` as normal to build the image:
+    -name dockerwatch@${IP}
 
-    > docker build -t dockerwatch .
+Also mnesia is configured to connect to the backend service at startup in
+[sys.config.src](dockerwatch/config/sys.config.src).
 
-Then the only thing that remains is to create the deployment.
+```
+{mnesia, [{extra_db_nodes,['dockerwatch@backend.default.svc.cluster.local']}]}
+```
+
+## Deploy the backend
+    
+We first setup the backend node as a service in order to easily find how to connect with it
+from the dockerwatch nodes. This only works if there is only one backend node. If you
+want to add more you need to use a more complex solution.
+
+```
+kubectl create service clusterip backend --tcp=12345:12345
+service/backend created
+```
+
+The backend is build like this:
+
+    eval $(minikube docker-env)
+    docker build -t backend -f Dockerfile.backend .
+
+and then deployed like this:
+
+```
+cat <<EOF | kubectl apply -f -
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  ## Name and labels of the Deployment
+  labels:
+    app: backend
+  name: backend
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: backend
+  template:
+    metadata:
+      labels:
+        app: backend
+    spec:
+      containers:
+      ## The container to launch
+      - image: backend
+        name: backend
+        imagePullPolicy: Never
+EOF
+```
+
+
+## Deploy Dockerwatch
+
+Dockerwatch is deployed as previously:
+
+```
+> kubectl create service nodeport dockerwatch --tcp=8080:8080 --tcp=8443:8443
+service/dockerwatch created
+> ./create-certs $(minikube ip)
+......
+> kubectl create secret generic dockerwatch --from-file=ssl/
+secret/dockerwatch created
+> eval $(minikube docker-env)
+> docker build -t dockerwatch .
+```
+
+with some small modifications to the config:
 
 ```
 cat <<EOF | kubectl apply -f -
@@ -132,7 +208,7 @@ metadata:
     app: dockerwatch
   name: dockerwatch
 spec:
-  replicas: 1
+  replicas: 10
   selector:
     matchLabels:
       app: dockerwatch
@@ -145,7 +221,7 @@ spec:
       ## The container to launch
       - image: dockerwatch
         name: dockerwatch
-        imagePullPolicy: Never ## Set to Never as we built the image in the cluster
+        imagePullPolicy: Never
         ports:
         - containerPort: 8080
           protocol: TCP
@@ -155,6 +231,11 @@ spec:
             - name: kube-keypair
               readOnly: true
               mountPath: /etc/ssl/certs
+        env:
+        - name: IP
+          valueFrom:
+            fieldRef:
+              fieldPath: status.podIP
       volumes:
         - name: kube-keypair
           secret:
@@ -162,38 +243,15 @@ spec:
 EOF
 ```
 
-This will create a Deployment called `dockerwatch` that run 1 replica
-of the specified dockerwatch container. The container exposes ports 8080
-and 8443 to the cluster and has the Secreat we created above mounted at
-`/etc/ssl/certs`. Most of the configuration above should be fairly self
-evident, refer to the kubernetes documentation for more details.
+## Testing
 
-The Service will know that this is the Deployment to connect to by looking
-at the metadata labels on the pods for a match to `app: dockerwatch`.
+We can then test the API using the same curl commands as the [simple demo](http://github.com/erlang/docker-erlang-example/tree/minikube-simple):
 
-## Test the API
-
-So now we have a kubernetes cluster running with an Erlang node in it, how do we
-test that it works? `minikube` provides the answer through it's service API:
-
-    > minikube service dockerwatch --url
-    http://192.168.99.101:31716
-    http://192.168.99.101:30383
-
-The IP:Port pairs above are the external ports exposed to access our dockerwatch
-service. So to work with the content we use the same REST API as in dockerwatch:
-
-    > curl -H "Content-Type: application/json" -X POST -d "" http://192.168.99.101:31716/cnt
-    > curl --cacert ssl/dockerwatch-ca.pem -H "Accept: application/json" https://192.168.99.101:30383
-    ["cnt"]
-
-## Further exploration
-
-Minikube comes with the kubernetes dashboard, so we can easily look through a
-web interface to look and change whatever we want. You access it by running:
-
-    > minikube dashboard
-
-This should open up a tab in your default browser where you can poke about. For
-instance one thing to try is to change the number of replicas of the dockerwatch
-ReplicaSet to and see what happens.
+```
+> curl -H "Content-Type: application/json" -X POST -d "" $(minikube service dockerwatch --url | head -1)/cnt
+> curl -H "Content-Type: application/json" -X POST -d "{}" $(minikube service dockerwatch --url | head -1)/cnt
+> curl --cacert ssl/dockerwatch-ca.pem -H "Accept: application/json" $(minikube service dockerwatch --url --https | tail -1)
+["cnt"]
+> curl --cacert ssl/dockerwatch-ca.pem -H "Accept: application/json" $(minikube service dockerwatch --url --https | tail -1)/cnt
+{"cnt":2}
+```

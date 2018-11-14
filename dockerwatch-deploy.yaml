@@ -6,7 +6,7 @@ metadata:
     app: dockerwatch
   name: dockerwatch
 spec:
-  replicas: 1
+  replicas: 10
   selector:
     matchLabels:
       app: dockerwatch
@@ -20,6 +20,8 @@ spec:
       - image: dockerwatch
         name: dockerwatch
         imagePullPolicy: Never ## Set to Never as we built the image in the cluster
+        stdin: true
+        tty: true
         ports:
         - containerPort: 8080
           protocol: TCP
@@ -29,6 +31,11 @@ spec:
             - name: kube-keypair
               readOnly: true
               mountPath: /etc/ssl/certs
+        env:
+        - name: IP
+          valueFrom:
+            fieldRef:
+              fieldPath: status.podIP
       volumes:
         - name: kube-keypair
           secret:
