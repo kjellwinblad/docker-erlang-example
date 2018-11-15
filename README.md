@@ -54,6 +54,12 @@ First however, make sure that the minikube cluster is started:
 
     > minikube start
 
+and that you have cloned this repo and checked out this branch:
+
+    > git clone https://github.com/erlang/docker-erlang-example
+    > cd docker-erlang-example
+    > git checkout minikube-dist
+
 ## Create backend
 
 The purpose of the backend is to be the service responsible for writing
