@@ -56,6 +56,12 @@ First however, make sure that the minikube cluster is started:
 
     > minikube start
 
+and that you have cloned this repo and checked out this branch:
+
+    > git clone https://github.com/erlang/docker-erlang-example
+    > cd docker-erlang-example
+    > git checkout minikube-simple
+
 ## Extend dockerwatch
 
 In this demo we will be using the [prometheus](https://hex.pm/packages/prometheus),
