@@ -12,6 +12,7 @@ matrix:
             - curl
             - jq
       script:
+        - cd ./advanced_examples/elk
         - ./advanced_examples/elk/.travis.sh
 
 
@@ -21,6 +22,7 @@ matrix:
           packages:
             - curl
       script:
+        - cd ./advanced_examples/logstash
         - ./advanced_examples/logstash/.travis.sh
 
 
