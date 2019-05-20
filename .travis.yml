@@ -13,7 +13,7 @@ matrix:
             - jq
       script:
         - cd ./advanced_examples/elk
-        - ./advanced_examples/elk/.travis.sh
+        - ./.travis.sh
 
 
     - env: logstash
@@ -23,7 +23,7 @@ matrix:
             - curl
       script:
         - cd ./advanced_examples/logstash
-        - ./advanced_examples/logstash/.travis.sh
+        - ./.travis.sh
 
 
     # - env: minikubedist
