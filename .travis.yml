@@ -1,5 +1,8 @@
 sudo: required
 
+env:
+- CHANGE_MINIKUBE_NONE_USER=true
+
 matrix:
   include:
     - env: elk
@@ -21,45 +24,37 @@ matrix:
         - ./advanced_examples/logstash/.travis.sh
 
 
-    - env: minikubedist
-      - CHANGE_MINIKUBE_NONE_USER=true
-      dist: xenial
-      addons:
-        apt:
-          packages:
-            - curl
-      script:
-        - ./advanced_examples/minikube-dist/.travis.sh
+    # - env: minikubedist
+    #   env:
+    #   - CHANGE_MINIKUBE_NONE_USER=true
+    #   dist: xenial
+    #   addons:
+    #     apt:
+    #       packages:
+    #         - curl
+    #   script:
+    #     - ./advanced_examples/minikube-dist/.travis.sh
 
 
-- env: minikubepromgraf
-      - CHANGE_MINIKUBE_NONE_USER=true
-      dist: xenial
-      addons:
-        apt:
-          packages:
-            - curl
-      script:
-        - ./advanced_examples/minikube-prom-graf/.travis.sh
+    #   - env: minikubepromgraf
+    #   env:
+    #   - CHANGE_MINIKUBE_NONE_USER=true
+    #   dist: xenial
+    #   addons:
+    #     apt:
+    #       packages:
+    #         - curl
+    #   script:
+    #     - ./advanced_examples/minikube-prom-graf/.travis.sh
 
 
-- env: minikubepromgraf
-      - CHANGE_MINIKUBE_NONE_USER=true
-      dist: xenial
-      addons:
-        apt:
-          packages:
-            - curl
-      script:
-        - ./advanced_examples/minikube-prom-graf/.travis.sh
-
-
-- env: minikubesimple
-      - CHANGE_MINIKUBE_NONE_USER=true
-      dist: xenial
-      addons:
-        apt:
-          packages:
-            - curl
-      script:
-        - ./advanced_examples/minikube-simple/.travis.sh
+    #   - env: minikubesimple
+    #   env:
+    #   - CHANGE_MINIKUBE_NONE_USER=true
+    #   dist: xenial
+    #   addons:
+    #     apt:
+    #       packages:
+    #         - curl
+    #   script:
+    #     - ./advanced_examples/minikube-simple/.travis.sh
