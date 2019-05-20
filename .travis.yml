@@ -1,0 +1,65 @@
+sudo: required
+
+matrix:
+  include:
+    - env: elk
+      addons:
+        apt:
+          packages:
+            - curl
+            - jq
+      script:
+        - ./advanced_examples/elk/.travis.sh
+
+
+    - env: logstash
+      addons:
+        apt:
+          packages:
+            - curl
+      script:
+        - ./advanced_examples/logstash/.travis.sh
+
+
+    - env: minikubedist
+      - CHANGE_MINIKUBE_NONE_USER=true
+      dist: xenial
+      addons:
+        apt:
+          packages:
+            - curl
+      script:
+        - ./advanced_examples/minikube-dist/.travis.sh
+
+
+- env: minikubepromgraf
+      - CHANGE_MINIKUBE_NONE_USER=true
+      dist: xenial
+      addons:
+        apt:
+          packages:
+            - curl
+      script:
+        - ./advanced_examples/minikube-prom-graf/.travis.sh
+
+
+- env: minikubepromgraf
+      - CHANGE_MINIKUBE_NONE_USER=true
+      dist: xenial
+      addons:
+        apt:
+          packages:
+            - curl
+      script:
+        - ./advanced_examples/minikube-prom-graf/.travis.sh
+
+
+- env: minikubesimple
+      - CHANGE_MINIKUBE_NONE_USER=true
+      dist: xenial
+      addons:
+        apt:
+          packages:
+            - curl
+      script:
+        - ./advanced_examples/minikube-simple/.travis.sh
