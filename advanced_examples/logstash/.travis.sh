@@ -24,4 +24,5 @@ curl -H 'Content-Type: application/json' -X POST -d '{\"value\":20}' http://$IP:
 curl -H 'Accept: text/plain' http://$IP:8080/cnt
 # Check that there are 6 lines in the log (one for each curl command above)
 sleep 10
-test "$(docker exec logstash cat /usr/share/logstash/logs/output.log | wc -l)" = "6"
+docker exec logstash cat /usr/share/logstash/logs/output.log
+test "$(docker exec logstash cat /usr/share/logstash/logs/output.log | wc -l)" = "7"
