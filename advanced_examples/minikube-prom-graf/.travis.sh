@@ -1,5 +1,8 @@
 #!/bin/bash
 
+set -x
+
+export CHANGE_MINIKUBE_NONE_USER=true
 
 # Download minikube.
 MINIKUBE_VERSION=latest
@@ -32,10 +35,10 @@ kubectl apply -f dockerwatch-deploy.yaml
 JSONPATH='{range .items[*]}{@.metadata.name}:{range @.status.conditions[*]}{@.type}={@.status};{end}{end}'; until kubectl -n default get pods -lapp=dockerwatch -o jsonpath="$JSONPATH" 2>&1 | grep -q "Ready=True"; do sleep 5;echo "waiting for dockerwatch to be available"; kubectl get pods --all-namespaces; done
 HTTP=$(minikube service dockerwatch --url | head -1)
 HTTPS=$(minikube service dockerwatch --url --https | tail -1)
-"curl -v -H 'Content-Type: application/json' -X POST -d '' $HTTP/cnt"
-"curl -v -H 'Content-Type: application/json' -X POST -d '{}' $HTTP/cnt"
-"curl -v --cacert ssl/dockerwatch-ca.pem -H 'Accept: application/json' $HTTPS/"
-"curl -v --cacert ssl/dockerwatch-ca.pem -H 'Accept: application/json' $HTTPS/cnt"
+curl -v -H 'Content-Type: application/json' -X POST -d '' $HTTP/cnt
+curl -v -H 'Content-Type: application/json' -X POST -d '{}' $HTTP/cnt
+curl -v --cacert ssl/dockerwatch-ca.pem -H 'Accept: application/json' $HTTPS/
+curl -v --cacert ssl/dockerwatch-ca.pem -H 'Accept: application/json' $HTTPS/cnt
 kubectl apply -f monitoring-namespace.yaml
 kubectl apply -f prometheus-config.yaml
 kubectl apply -f prometheus-deployment.yaml

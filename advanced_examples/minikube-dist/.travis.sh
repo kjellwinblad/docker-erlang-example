@@ -1,5 +1,7 @@
 #!/bin/bash
 
+set -x
+
 export CHANGE_MINIKUBE_NONE_USER=true
 # Download minikube.
 MINIKUBE_VERSION=latest
