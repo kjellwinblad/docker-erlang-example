@@ -34,7 +34,7 @@ matrix:
             - curl
       script:
         - cd ./advanced_examples/minikube-dist
-        - ./advanced_examples/minikube-dist/.travis.sh
+        - /.travis.sh
 
 
     #   - env: minikubepromgraf
