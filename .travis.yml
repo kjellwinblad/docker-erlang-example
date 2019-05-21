@@ -5,25 +5,25 @@ env:
 
 matrix:
   include:
-    # - env: elk
-    #   addons:
-    #     apt:
-    #       packages:
-    #         - curl
-    #         - jq
-    #   script:
-    #     - cd ./advanced_examples/elk
-    #     - ./.travis.sh
+    - env: elk
+      addons:
+        apt:
+          packages:
+            - curl
+            - jq
+      script:
+        - cd ./advanced_examples/elk
+        - ./.travis.sh
 
 
-    # - env: logstash
-    #   addons:
-    #     apt:
-    #       packages:
-    #         - curl
-    #   script:
-    #     - cd ./advanced_examples/logstash
-    #     - ./.travis.sh
+    - env: logstash
+      addons:
+        apt:
+          packages:
+            - curl
+      script:
+        - cd ./advanced_examples/logstash
+        - ./.travis.sh
 
 
     - env: minikubedist

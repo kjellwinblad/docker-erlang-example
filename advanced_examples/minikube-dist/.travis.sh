@@ -15,14 +15,14 @@ sudo minikube start -v 7 --logtostderr --vm-driver=none --kubernetes-version "$K
 # Fix the kubectl context, as it's often stale.
 minikube update-context
 # Wait for Kubernetes to be up and ready.
-JSONPATH='{range .items[*]}{@.metadata.name}:{range @.status.conditions[*]}{@.type}={@.status};{end}{end}'; until kubectl get nodes -o jsonpath="$JSONPATH" 2>&1 | grep -q "Ready=True"; do sleep 1; done
+JSONPATH='{range .items[*]}{@.metadata.name}:{range @.status.conditions[*]}{@.type}={@.status};{end}{end}'; until kubectl get nodes -o jsonpath="$JSONPATH" 2>&1 | grep -q "Ready=True"; do sleep 2; done
 
 #script:
 kubectl cluster-info
 # kube-addon-manager is responsible for managing other kubernetes components, such as kube-dns, dashboard, storage-provisioner..
-JSONPATH='{range .items[*]}{@.metadata.name}:{range @.status.conditions[*]}{@.type}={@.status};{end}{end}'; until kubectl -n kube-system get pods -lcomponent=kube-addon-manager -o jsonpath="$JSONPATH" 2>&1 | grep -q "Ready=True"; do sleep 5;echo "waiting for kube-addon-manager to be available"; kubectl get pods --all-namespaces; done
+JSONPATH='{range .items[*]}{@.metadata.name}:{range @.status.conditions[*]}{@.type}={@.status};{end}{end}'; until kubectl -n kube-system get pods -lcomponent=kube-addon-manager -o jsonpath="$JSONPATH" 2>&1 | grep -q "Ready=True"; do sleep 10;echo "waiting for kube-addon-manager to be available"; kubectl get pods --all-namespaces; done
 # Wait for kube-dns to be ready.
-JSONPATH='{range .items[*]}{@.metadata.name}:{range @.status.conditions[*]}{@.type}={@.status};{end}{end}'; until kubectl -n kube-system get pods -lk8s-app=kube-dns -o jsonpath="$JSONPATH" 2>&1 | grep -q "Ready=True"; do sleep 5;echo "waiting for kube-dns to be available"; kubectl get pods --all-namespaces; done
+JSONPATH='{range .items[*]}{@.metadata.name}:{range @.status.conditions[*]}{@.type}={@.status};{end}{end}'; until kubectl -n kube-system get pods -lk8s-app=kube-dns -o jsonpath="$JSONPATH" 2>&1 | grep -q "Ready=True"; do sleep 10;echo "waiting for kube-dns to be available"; kubectl get pods --all-namespaces; done
 kubectl create service clusterip backend --tcp=12345:12345
 docker build -t backend -f Dockerfile.backend .
 kubectl apply -f backend-deploy.yaml
@@ -34,10 +34,10 @@ kubectl get secret
 docker build -t dockerwatch .
 kubectl apply -f dockerwatch-deploy.yaml
 # Wait for dockerwatch to be ready.
-JSONPATH='{range .items[*]}{@.metadata.name}:{@.status.readyReplicas};{end}'; until kubectl -n default get deployment -lapp=dockerwatch -o jsonpath="$JSONPATH" 2>&1 | grep -q ":10"; do sleep 5;echo "waiting for dockerwatch to be available"; kubectl get pods --all-namespaces; done
+JSONPATH='{range .items[*]}{@.metadata.name}:{@.status.readyReplicas};{end}'; until kubectl -n default get deployment -lapp=dockerwatch -o jsonpath="$JSONPATH" 2>&1 | grep -q ":10"; do sleep 10;echo "waiting for dockerwatch to be available"; kubectl get pods --all-namespaces; done
 HTTP=$(minikube service dockerwatch --url | head -1)
 HTTPS=$(minikube service dockerwatch --url --https | tail -1)
-until curl -v -H 'Content-Type: application/json' -X POST -d '' $HTTP/cnt; do sleep 10; done
+until curl -v -H 'Content-Type: application/json' -X POST -d '' $HTTP/cnt; do sleep 20; done
 curl -v -H 'Content-Type: application/json' -X POST -d '{}' $HTTP/cnt
 curl -v --cacert ssl/dockerwatch-ca.pem -H 'Accept: application/json' $HTTPS/
 curl -v --cacert ssl/dockerwatch-ca.pem -H 'Accept: application/json' $HTTPS/cnt
