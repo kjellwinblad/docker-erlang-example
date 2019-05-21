@@ -30,9 +30,12 @@ echo THE_TEST
 test "$(docker exec elk_logstash_1 cat /usr/share/logstash/logs/output.log | wc -l)" = "6"
 # Get the index name, and check that there are also 6 log events to be read from elasticsearch
 INDEX=$(curl -s 'localhost:9200/_cat/indices/logstash*?h=i')
+echo THE INDEX
 echo $INDEX
 S=$(curl -s "localhost:9200/$INDEX/_search?_source=false")
+echo PRINT VALUE OF S
 echo $S
-T=$(curl -s "localhost:9200/$INDEX/_search?_source=false" | jq -r ".hits.total")
+T=$(curl -s "localhost:9200/$INDEX/_search?_source=false" | jq -r ".timed_out")
+echo PRINT VALUE OF T
 echo $T
-test "$T" = "6"
+test "$T" = "false"
