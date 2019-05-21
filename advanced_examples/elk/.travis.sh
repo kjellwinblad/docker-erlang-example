@@ -27,7 +27,7 @@ echo TEST7WAIT
 # Check that there are 6 lines in the logstash log (one for each curl command above)
 sleep 10
 echo THE_TEST
-test "$(docker exec dockererlangexample_logstash_1 cat /usr/share/logstash/logs/output.log | wc -l)" = "6"
+test "$(docker exec elk_logstash_1 cat /usr/share/logstash/logs/output.log | wc -l)" = "6"
 # Get the index name, and check that there are also 6 log events to be read from elasticsearch
 INDEX=$(curl -s 'localhost:9200/_cat/indices/logstash*?h=i')
 echo $INDEX
