@@ -1,5 +1,7 @@
 #!/bin/bash
 
+set -x
+
 ./create-certs
 docker build -t logstash logstash/
 docker run --name logstash -d -p 9600:9600 -p 44622:44622/udp logstash
@@ -21,5 +23,5 @@ curl -H 'Content-Type: application/json' -X POST -d '{\"value\":20}' http://$IP:
 # Read the counter `cnt` as text using http
 curl -H 'Accept: text/plain' http://$IP:8080/cnt
 # Check that there are 6 lines in the log (one for each curl command above)
-sleep 5
+sleep 10
 test "$(docker exec logstash cat /usr/share/logstash/logs/output.log | wc -l)" = "6"
